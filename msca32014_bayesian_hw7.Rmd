@@ -1,0 +1,442 @@
+---
+title: "msca32014_hw7"
+author: "Zhiyin Shi"
+date: "May 16, 2017"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+This project helps understanding comparison of groups in Gaussian model without predictors
+
+##Part 1. Use at least 2 different methods proving that the groups in section 3.3 of part 1 of the workshop are different.
+
+###1.1.1. Build stan model: Import Data and Construct data list
+```{r}
+myData=read.csv("/Users/JaneShi/Desktop/MSCA32014/Lecture7/TwoGroupIQ.csv")
+y       = as.numeric(myData[,"Score"])
+x       = as.numeric(as.factor(myData[,"Group"]))
+xLevels = levels(as.factor(myData[,"Group"]))
+
+Ntotal  = length(y)
+# Specify the data in a list, for later shipment to JAGS:
+dataList= list(
+    y      = y ,
+    x      = x ,
+    Ntotal = Ntotal ,
+    meanY  = mean(y) ,
+    sdY    = sd(y)
+)
+```
+
+###1.1.2. Construct Model String for JAGS
+```{r}
+modelString = "
+data {
+    int<lower=1> Ntotal;
+    real y[Ntotal];
+    int<lower=1> x[Ntotal];
+    real meanY;
+    real sdY;
+}
+transformed data {
+    real unifLo;
+    real unifHi;
+    real normalSigma;
+    real expLambda;
+    unifLo = sdY/1000;
+    unifHi = sdY*1000;
+    normalSigma = sdY*100;
+    expLambda=1/29.0;
+}
+parameters {
+    real<lower=0> nuMinusOne[2];
+    real mu[2];
+    real<lower=0> sigma[2];
+}
+transformed parameters {
+    real<lower=0> nu[2];
+    nu[1] = nuMinusOne[1] + 1;
+    nu[2] = nuMinusOne[2] + 1;
+}
+model {
+    sigma      ~ uniform(unifLo, unifHi);
+    mu         ~ normal(meanY, normalSigma);
+    nuMinusOne ~ exponential(expLambda);
+    for (i in 1:Ntotal) {
+      y[i] ~ student_t(nuMinusOne[x[i]], mu[x[i]], sigma[x[i]]);
+    }
+}
+" # close quote for modelString
+
+#Write stan model
+writeLines( modelString , con = "/Users/JaneShi/Desktop/MSCA32014/DBDA2Eprograms2/TEMPmodel.stan")
+```
+
+###1.1.3 Write stan model
+```{r}
+#Load libraries
+suppressWarnings(source("/Users/JaneShi/Desktop/MSCA32014/DBDA2Eprograms2/DBDA2E-utilities.R"))
+suppressWarnings(library(rstan))
+
+#Set MCMC parameters
+parameters   = c( "mu" , "sigma" , "nu" )     
+adaptSteps   = 500
+burnInSteps  = 1000
+nChains      = 4 
+thinSteps    = 1
+numSavedSteps= 5000
+
+# Get MC sample of posterior
+stanFitRobust = stan(file = "/Users/JaneShi/Desktop/MSCA32014/DBDA2Eprograms2/TEMPmodel.stan",
+            data  = dataList, pars = parameters,
+            iter  =(ceiling(numSavedSteps/nChains)*thinSteps+burnInSteps), 
+            chains= nChains, cores = nChains, warmup = burnInSteps, 
+            init  = "random", thin = thinSteps)
+
+#Save stan model
+save(stanFitRobust, file = "/Users/JaneShi/Desktop/MSCA32014/DBDA2Eprograms2/StanRobustFit2Groups.Rdata")
+load("/Users/JaneShi/Desktop/MSCA32014/DBDA2Eprograms2/StanRobustFit2Groups.Rdata")
+```
+
+###1.1.4. Compare two groups - Method1: FNP Approach
+```{r}
+par(mfrow = c(2, 1))
+qqnorm(y[x==1], main = "Normal Q-Q Plot for Group 1")
+qqline(y[x==1])
+
+qqnorm(y[x==2], main = "Normal Q-Q Plot for Group 2")
+qqline(y[x==2])
+
+#Welch Test for group equality
+t.test(y[x==1],y[x==2], var.equal=F, paired=FALSE)
+```
+**Comment:** From the q-q plot we can see obviously neither of the groups comes from Gaussian distribution. The welch two sample t-test, which assumes the two groups are normally distributed, resulted in p-value = 0.05273. Our null hypothesis that the two groups are equal cannot be rejected at 5% significance level. However, since the assumption does not hold and the p-value is very close to 0.05, we can not make a strong conclusion at this point.
+
+###1.1.4. Compare two groups- Method2: Bayesian Approach
+```{r}
+#exploratory plots
+print (stanFitRobust)
+plot(stanFitRobust)
+rstan::traceplot(stanFitRobust, ncol=1, inc_warmup=F)
+
+#Extract mean and sd for the parameters from MCMC result
+dis1 = cbind(Mu=rstan::extract(stanFitRobust,pars="mu[1]")$'mu[1]',
+            Sigma=rstan::extract(stanFitRobust,pars="sigma[1]")$'sigma[1]')
+dis2 = cbind(Mu=rstan::extract(stanFitRobust,pars="mu[2]")$'mu[2]',
+            Sigma=rstan::extract(stanFitRobust,pars="sigma[2]")$'sigma[2]')
+head(dis1[, "Sigma"])
+#Density plot of means of two groups 
+par(mfrow = c(2, 1))
+denMu1 = density(dis1[,"Mu"])
+denMu2 = density(dis2[,"Mu"])
+plot(denMu1, col = "blue", xlim = c(90,120), 
+     main = "Density Plot for Parameter Mean of Two Groups")
+lines(denMu2, col = "green")
+
+denSig1 = density(dis1[,"Sigma"])
+denSig2  =density(dis2[,"Sigma"])
+plot(denSig1, col = "blue", xlim = c(0,40), 
+     main= "Density Plot for Parameter Sigma of Two Groups")
+lines(denSig2,col="green")
+
+#Calclate HDI
+library(HDInterval)
+hdi(cbind(dis1[,1],dis2[,1]),credMass=.9)
+hdi(cbind(dis1[,2],dis2[,2]),credMass=.85)
+```
+**Comment:**From the density plots of mean and sigma, we can see each group has different distribution. By adjusting the credible mass level, the mean of two groups are seperated at 90% HDI interval and the sigma of two groups are seperated at 85% HDI interval.
+
+###1.1.4. Compare two groups-Method3: FNP approach to Markov chains
+```{r}
+#Compare if the variance parameter of two groups are equal
+ks.test(dis1[,2],dis2[,2])
+t.test(dis1[,2],dis2[,2], var.equal=F, paired=FALSE)
+
+#Compare if the mean parameter of two groups are equal
+ks.test(dis1[,1],dis2[,1])
+t.test(dis1[,1],dis2[,1], var.equal=F, paired=FALSE)
+
+#Plot posterior samples of two groups
+par(mfrow = c(1,1))
+plot(dis1, xlim = c(92,118), ylim = c(5,33), col = "red", xlab = "Mean",
+     ylab = "St. Dev.")
+points(dis2 , col = "blue")
+```
+**Comment:** Both ks.test and t.test suggest the mean and sd parameters of the two groups are significantly different from each other. Therefore the two groups are not the same. 
+
+##Part 2. Analyze convergence of MCMC in section 5.1.4 of part 2 of the workshop, try to adjust parameters and rerun the process to obtain the a better quality of MCMC
+
+###2.1 Import Data
+```{r}
+df = read.csv("/Users/JaneShi/Desktop/MSCA32014/Lecture7/HierLinRegressData.csv")
+
+dataList = list(Ntotal = length(df$Y),
+               y = df$Y,
+               x = df$X,
+               Ngroups = max(df$Subj),
+               group = df$Subj
+)
+```
+
+###2.2 Construct stan model string
+```{r}
+modelString = "
+data {
+    int<lower=1> Ntotal;
+    vector[Ntotal] y;
+    vector[Ntotal] x;
+    int<lower=1> Ngroups;
+    int<lower=1, upper=Ngroups> group[Ntotal];
+}
+transformed data {
+    real meanY;
+    real sdY;
+    vector[Ntotal] zy; // normalized y
+    real meanX;
+    real sdX;
+    vector[Ntotal] zx; // normalized x
+    meanY <- mean(y);
+    sdY <- sd(y);
+    zy <- (y - meanY) / sdY;
+    meanX <- mean(x);
+    sdX <- sd(x);
+    zx <- (x - meanX) / sdX;
+}
+parameters {
+    real<lower=0> zsigma;
+    real<lower=0> nu;
+    real zbeta0mu;
+    real zbeta1mu;
+    real<lower=0> zbeta0sigma;
+    real<lower=0> zbeta1sigma;
+    vector[Ngroups] zbeta0;
+    vector[Ngroups] zbeta1;
+}
+transformed parameters {
+    real<lower=0> sigma;
+    real beta0mu;
+    real beta1mu;
+    vector[Ngroups] beta0;
+    vector[Ngroups] beta1;
+    // Transform to original scale:
+    sigma <- zsigma * sdY;
+    beta0mu <- meanY + zbeta0mu * sdY  - zbeta1mu * meanX * sdY / sdX;
+    beta1mu <- zbeta1mu * sdY / sdX;
+    beta0 <- meanY + zbeta0 * sdY  - zbeta1 * meanX * sdY / sdX; // vectorized
+    beta1 <- zbeta1 * sdY / sdX;                                 // vectorized
+}
+model {
+    zsigma ~ uniform(0.001, 1000);
+    nu ~ exponential(1/30.0);
+    zbeta0mu ~ normal(0, 10.0^2);
+    zbeta1mu ~ normal(0, 10.0^2);
+    zbeta0sigma ~ uniform(0.001, 1000);
+    zbeta1sigma ~ uniform(0.001, 1000);
+    zbeta0 ~ normal(zbeta0mu, zbeta0sigma);  // vectorized
+    zbeta1 ~ normal(zbeta1mu, zbeta1sigma);  // vectorized
+    for (i in 1:Ntotal) {
+        zy[i] ~ student_t(1+nu, zbeta0[group[i]] + zbeta1[group[i]] * x[i], zsigma);
+    }
+}
+"
+
+#Write stan model
+writeLines( modelString , con = "/Users/JaneShi/Desktop/MSCA32014/DBDA2Eprograms2/TEMPmodel.stan")
+```
+
+###2.3 Write Stan model
+```{r}
+stanFitReg = stan(file = "/Users/JaneShi/Desktop/MSCA32014/DBDA2Eprograms2/TEMPmodel.stan",
+            data  = dataList, pars = c('nu', 'sigma', 'beta0mu', 'beta1mu', 'beta0', 'beta1', 'zbeta0sigma', 'zbeta1sigma'), iter = 5000, chains = 4,
+            cores = 4)
+
+rstan::traceplot(stanFitReg, ncol=1, inc_warmup=F,pars=c('nu', 'sigma', 'beta0mu', 'beta1mu'))
+```
+**Comment:** From the traceplot we can see there are flat lines in the multiple parameter plots such as beta0mu and beta1mu. These patterns indicates poor convergence during that period.
+
+###2.4 Adjust step size to improve convergence
+```{r}
+stanFitReg = stan(file = "/Users/JaneShi/Desktop/MSCA32014/DBDA2Eprograms2/TEMPmodel.stan",
+data  = dataList, pars = c('nu', 'sigma', 'beta0mu', 'beta1mu', 'beta0', 'beta1', 'zbeta0sigma', 'zbeta1sigma'), iter = 5000, chains =4, cores = 4,
+control = list(adapt_delta = 0.9, stepsize = 0.01, max_treedepth = 15))
+```
+**Comment:** After tuning the stepsize and treedepth multiple times, all parameters finally converge at stepsize = 0.01 , treedepth = 15, iter = 5000, and adapt_delta = 0.9.
+
+##Part 3. Consider data state.x77 from datasets. Using LifeExp as response fit Gaussian and robust non-hierarchical regression models using Bayesian approach.
+
+###3.1 Import data
+```{r}
+library(datasets)
+data(state)
+
+dat3 = as.data.frame(state.x77)
+colnames(dat3)[4] = "LifeExp"
+colnames(dat3)[6] = "HSGrad"
+head(dat3)
+```
+
+###3.2 Gaussian non-hierarchical regression model
+
+**3.2.1 Construct data list**
+```{r}
+dataList = list(Ntotal = length(dat3$LifeExp), y = dat3$LifeExp, 
+                x = as.matrix(dat3[, -4]), Nx= ncol(dat3) - 1)
+```
+
+**3.2.2 Construct model string**
+```{r}
+modelString<-"
+data {
+    int<lower=1> Ntotal;
+    int<lower=1> Nx;
+    vector[Ntotal] y;
+    matrix[Ntotal, Nx] x;
+}
+transformed data {
+    real meanY;
+    real sdY;
+    vector[Ntotal] zy; // normalized
+    vector[Nx] meanX;
+    vector[Nx] sdX;
+    matrix[Ntotal, Nx] zx; // normalized
+    
+    meanY = mean(y);
+    sdY = sd(y);
+    zy = (y - meanY) / sdY;
+    for ( j in 1:Nx ) {
+        meanX[j] = mean(x[,j]);
+        sdX[j] = sd(x[,j]);
+        for ( i in 1:Ntotal ) {
+            zx[i,j] = ( x[i,j] - meanX[j] ) / sdX[j];
+        }
+    }
+}
+parameters {
+    real zbeta0;
+    vector[Nx] zbeta;
+    real<lower=0> zsigma;
+}
+transformed parameters{
+    vector[Ntotal] zy_hat;
+    zy_hat = zbeta0 + zx * zbeta;
+}
+model {
+    zbeta0 ~ normal(0, 2);
+    zbeta  ~ normal(0, 2);
+    zsigma ~ uniform(1.0E-5 , 1.0E+1);
+    zy ~ normal(zy_hat, zsigma);
+}
+generated quantities { 
+    // Transform to original scale:
+    real beta0; 
+    vector[Nx] beta;
+    real sigma;
+    // .* and ./ are element-wise product and divide
+    beta0 = zbeta0*sdY  + meanY - sdY * sum( zbeta .* meanX ./ sdX );
+    beta = sdY * ( zbeta ./ sdX );
+    sigma = zsigma * sdY;
+} "
+
+#Write stan model
+writeLines( modelString , con = "/Users/JaneShi/Desktop/MSCA32014/DBDA2Eprograms2/TEMPmodel.stan")
+```
+
+**3.2.3 Write Stan model**
+```{r}
+stanFitMulReg = stan(file = "/Users/JaneShi/Desktop/MSCA32014/DBDA2Eprograms2/TEMPmodel.stan",
+data  = dataList, pars = c('sigma', 'beta0', 'beta'), iter = 5000, chains = 4, cores = 4)
+```
+
+**3.2.4 Analyze results**
+```{r}
+print (stanFitMulReg)
+plot(stanFitMulReg)
+rstan::traceplot(stanFitMulReg, ncol=1, inc_warmup=F)
+stan_dens(stanFitMulReg)
+stan_ac(stanFitMulReg, separate_chains = T)
+stan_diag(stanFitMulReg,information = "sample",chain=0)
+stan_diag(stanFitMulReg,information = "stepsize",chain = 0)
+stan_diag(stanFitMulReg,information = "treedepth",chain = 0)
+stan_diag(stanFitMulReg,information = "divergence",chain = 0)
+```
+**Comment:** Among the 7 features, 6 of them are very close to zero, indicating these features are not significant. The confidence intervals of all parameters are very narrow indicating good accuracy. The feature "Murder" has coefficient -0.3, which grows in opposite direction from LifeExp. 
+
+###3.3 Student T non-hierarchical regression model
+```{r}
+modelString<-"
+data {
+    int<lower=1> Ntotal;
+    int<lower=1> Nx;
+    vector[Ntotal] y;
+    matrix[Ntotal, Nx] x;
+}
+transformed data {
+    real meanY;
+    real sdY;
+    vector[Ntotal] zy; // normalized
+    vector[Nx] meanX;
+    vector[Nx] sdX;
+    matrix[Ntotal, Nx] zx; // normalized
+    
+    meanY = mean(y);
+    sdY = sd(y);
+    zy = (y - meanY) / sdY;
+    for ( j in 1:Nx ) {
+        meanX[j] = mean(x[,j]);
+        sdX[j] = sd(x[,j]);
+        for ( i in 1:Ntotal ) {
+            zx[i,j] = ( x[i,j] - meanX[j] ) / sdX[j];
+        }
+    }
+}
+parameters {
+    real zbeta0;
+    vector[Nx] zbeta;
+    real<lower=0> nu;
+    real<lower=0> zsigma;
+}
+transformed parameters{
+    vector[Ntotal] zy_hat;
+    zy_hat = zbeta0 + zx * zbeta;
+}
+model {
+    zbeta0 ~ normal(0, 2);
+    zbeta  ~ normal(0, 2);
+    nu ~ exponential(1/30.0);
+    zsigma ~ uniform(1.0E-5 , 1.0E+1);
+    zy ~ student_t(1+nu, zy_hat, zsigma);
+}
+generated quantities { 
+    // Transform to original scale:
+    real beta0; 
+    vector[Nx] beta;
+    real sigma;
+    // .* and ./ are element-wise product and divide
+    beta0 = zbeta0*sdY  + meanY - sdY * sum( zbeta .* meanX ./ sdX );
+    beta = sdY * ( zbeta ./ sdX );
+    sigma = zsigma * sdY;
+} "
+
+#Write stan model
+writeLines( modelString , con = "/Users/JaneShi/Desktop/MSCA32014/DBDA2Eprograms2/TEMPmodel.stan")
+
+stanFitMulRegT = stan(file = "/Users/JaneShi/Desktop/MSCA32014/DBDA2Eprograms2/TEMPmodel.stan",
+            data  = dataList, pars = c('sigma', 'beta0', 'beta'), 
+            iter = 5000, chains = 4, cores = 4)
+```
+
+**Analyze the results
+```{r}
+print (stanFitMulRegT)
+plot(stanFitMulRegT)
+rstan::traceplot(stanFitMulRegT, ncol=1, inc_warmup=F)
+stan_dens(stanFitMulRegT)
+stan_ac(stanFitMulRegT, separate_chains = T)
+stan_diag(stanFitMulRegT,information = "sample",chain=0)
+stan_diag(stanFitMulRegT,information = "stepsize",chain = 0)
+stan_diag(stanFitMulRegT,information = "treedepth",chain = 0)
+stan_diag(stanFitMulRegT,information = "divergence",chain = 0)
+```
+**Comment:** Prior distribution with t-distribution resulted in similar results as to the normal prior. 

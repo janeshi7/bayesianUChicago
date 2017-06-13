@@ -1,0 +1,193 @@
+---
+title: "msca32014_hw6"
+author: "Zhiyin Shi"
+date: "May 10, 2017"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+0. Import Data
+```{r}
+suppressWarnings(library(quantmod))
+getSymbols("AAPL", from="2015-1-1",to="2015-12-31")
+AAPL.1.day = as.matrix(AAPL)
+AAPL.returns.2015 = diff(AAPL.1.day[,6])
+
+dataPath = "/Users/JaneShi/Desktop/MSCA32014/Lecture6"
+AAPL.ret = read.csv(paste(dataPath,"AAPL_2015.csv",sep="/"))$x
+```
+
+1. Visualize the distribution of the returns.
+```{r}
+AAPL.dens = density(AAPL.ret)
+plot(AAPL.dens)
+lines(AAPL.dens$x,dnorm(AAPL.dens$x,mean(AAPL.ret),sd(AAPL.ret)),col="red")
+```
+
+2. Using the methods of the workshop estimate parameters of normal model and robust normal model for the Apple returns.\
+Estimate realized arithmetic volatility of Apple returns using both normal and robust models.\
+Volatility is calculated as sigma = Sd * sqrt(365), where Sd is standard deviation of daily arithmetic returns S(t)−S(t−1), S(t) is stock price.\
+\
+2.1. Estimate parameters of normal model\
+2.1.1. Prepare dataList for JAGS model
+```{r}
+dataList1 = list(
+    y       = AAPL.ret ,
+    Ntotal  = length(AAPL.ret),
+    mean_mu = mean(AAPL.ret) ,
+    sd_mu   = sd(AAPL.ret)
+)
+```
+
+2.1.2 Prepare JAGS Model String
+```{r}
+suppressWarnings(library(HDInterval))
+suppressWarnings(library(rjags))
+
+modelString1 = "
+  model {
+    for ( i in 1:Ntotal) {
+      y[i] ~ dnorm(mu , 1/sigma^2)
+    }
+    mu ~ dnorm(mean_mu , 1/(100*sd_mu)^2)
+    sigma ~ dunif( sd_mu/1000 , sd_mu*1000 )
+  }"
+# Write out modelString to a text file
+writeLines(modelString1 , con= "TEMPmodel.txt")
+```
+
+2.1.3. Initialize JAGS
+```{r}
+initsList = function() {
+    upDown = sample(c(1,-1), 1)
+    m      = mean(AAPL.ret) * (1 + upDown * .05)
+    s      = sd(AAPL.ret) * (1 - upDown * .1) 
+    list(mu= m , sigma= s)
+}
+
+parameters = c( "mu" , "sigma")     # The parameters to be monitored
+adaptSteps = 500                    # Number of steps to "tune" the samplers
+burnInSteps= 1000
+numSavedSteps=50000
+nChains    = 4 
+thinSteps  = 1
+nIter      = ceiling((numSavedSteps * thinSteps) / nChains)
+```
+
+2.1.4 JAGS Kick-off
+```{r}
+jagsModel1 = jags.model("TEMPmodel.txt", data= dataList1, inits =initsList,
+                         n.chains = nChains, n.adapt = adaptSteps)
+
+# Burn-in:
+update(jagsModel1 , n.iter=burnInSteps)
+
+# The saved MCMC chain:
+codaSamples1 = coda.samples(jagsModel1 , variable.names = parameters, 
+                            n.iter = nIter, thin = thinSteps)
+```
+
+2.1.5 Analysis
+```{r}
+summary(codaSamples1)
+
+#See the means
+mean(AAPL.ret)
+sd(AAPL.ret)
+
+#Convergence plot
+plot(codaSamples1)
+
+#Autocorrelation Plot
+autocorr.plot(codaSamples1, ask=F)
+effectiveSize(codaSamples1)
+
+#Gelman Plot
+gelman.diag(codaSamples1)
+gelman.plot(codaSamples1)
+
+#HDI Interval
+lapply(codaSamples1, function(z) hdi(as.matrix(z)))
+```
+
+2.2 Robust estimation using t-distribution\
+2.2.1 dataList is the same as dataList1\
+2.2.2 Prepare JAGS model String
+```{r}
+modelString = "
+model {
+for ( i in 1:Ntotal ) {
+    y[i] ~ dt(mu,1/sigma^2,nu)
+}
+mu ~ dnorm( mean_mu , 1/(100*sd_mu)^2 )
+sigma ~ dunif( sd_mu/1000 , sd_mu*1000 )
+nu ~ dexp(1/30.0)
+}
+  " # close quote for modelString
+  # Write out modelString to a text file
+writeLines( modelString , con="TEMPmodel.txt" )
+```
+
+2.2.3 Initialize JAGS
+```{r}
+initsList2 = function() {
+    upDown = sample(c(1,-1), 1)
+    m = mean(AAPL.ret) * (1 + upDown * .05)
+    s = sd(AAPL.ret) * (1 - upDown * .1) 
+    list(mu = m , sigma = s, nu = 2)
+}
+
+parameters = c("mu", "sigma", "nu")    # The parameters to be monitored
+adaptSteps = 500               # Number of steps to "tune" the samplers
+burnInSteps= 1000
+nChains    = 3 
+thinSteps  = 1
+numSavedSteps=50000
+(nIter = ceiling( ( numSavedSteps * thinSteps ) / nChains ))
+```
+
+2.2.4 JAGS Model
+```{r}
+jagsModel2 =jags.model("TEMPmodel.txt", data=dataList1, inits=initsList2,
+                        n.chains = nChains, n.adapt = adaptSteps)
+# Burn-in:
+update(jagsModel2, n.iter = burnInSteps)
+# The saved MCMC chain:
+codaSamples2 = coda.samples(jagsModel2, variable.names = parameters , 
+                            n.iter = nIter, thin = thinSteps)
+```
+
+2.2.5 Analysis
+```{r}
+summary(codaSamples2)
+
+#Check stats
+mean(AAPL.ret)
+sd(AAPL.ret)
+
+plot(codaSamples2)
+autocorr.plot(codaSamples2, ask=F)
+effectiveSize(codaSamples2)
+gelman.diag(codaSamples2)
+gelman.plot(codaSamples2)
+(HDIofChains<-lapply(codaSamples2,function(z) hdi(as.matrix(z))))
+```
+
+2.3 Estimate realized arithmetic volatility of Apple returns using both normal and robust models.
+```{r}
+first.diff  = diff(AAPL.ret)
+n           = length(first.diff)
+
+sd.normal   = sqrt(sum((first.diff - mean(first.diff))^2) / n)
+sd.robust   = sd(first.diff)
+
+vol.normal  = sd.normal * sqrt(365)
+vol.robust  = sd.robust * sqrt(365)
+
+vol.normal
+vol.robust
+```
+

@@ -1,0 +1,489 @@
+---
+title: "msca32014_finalProject_zshi"
+author: "Zhiyin Shi"
+date: "June 6, 2017"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+0. Import and Explore Data
+```{r}
+dataPath = "/Users/JaneShi/Desktop/MSCA32014/Project/"
+dat      = read.csv(paste0(dataPath, "data.csv"))
+
+
+head(dat)
+unique(dat$sex)
+unique(dat$race)
+unique(dat$age)
+unique(dat$education)
+unique(dat$state)
+```
+
+1. Create data list
+```{r, eval= FALSE}
+dataList = list(N = length(dat$y),
+                y = dat$y,
+                sex = as.integer(dat$sex),
+                NSex = nlevels(dat$sex),
+                race = as.integer(dat$race),
+                NRace = nlevels(dat$race),
+                age = as.integer(dat$age),
+                NAge = nlevels(dat$age),
+                education = as.integer(dat$education),
+                NEducation = nlevels(dat$education),
+                state = as.integer(dat$state),
+                NState = nlevels(dat$state))
+```
+
+2. Create stan object
+```{r, eval= FALSE}
+modelString = "
+data { 
+  int<lower=1> N;
+  int<lower=0,upper=1> y[N];
+  int<lower=1> NSex;
+  int<lower=1, upper=NSex> sex[N];
+  int<lower=1> NRace;
+  int<lower=1, upper=NRace> race[N];
+  int<lower=1> NAge;
+  int<lower=1, upper=NAge> age[N];
+  int<lower=1> NEducation;
+  int<lower=1, upper=NEducation> education[N];
+  int<lower=1> NState;
+  int<lower=1, upper=NState> state[N];
+}
+parameters { 
+  real<lower=0> nu;
+  real<lower=0> sigma;
+  real a_0;
+  real<lower=0> var_0;
+  vector[NSex]  a_sex;
+  vector[NRace] a_race;
+  vector[NAge]  a_age;
+  vector[NEducation] a_education;
+  vector[NState] a_state;
+  real<lower=0> var_sex;
+  real<lower=0> var_race;
+  real<lower=0> var_age;
+  real<lower=0> var_education;
+  real<lower=0> var_state;
+  matrix[NSex,NRace] a_sex_race;
+  matrix[NSex,NAge] a_sex_age;
+  matrix[NSex,NEducation] a_sex_education;
+  matrix[NSex,NState] a_sex_state;
+  matrix[NRace,NAge] a_race_age;
+  matrix[NRace,NEducation] a_race_education;
+  matrix[NRace,NState] a_race_state;
+  matrix[NAge,NEducation] a_age_education;
+  matrix[NAge,NState] a_age_state;
+  matrix[NEducation,NState] a_education_state;
+  real<lower=0> var_sex_race;
+  real<lower=0> var_sex_age;
+  real<lower=0> var_sex_education;
+  real<lower=0> var_sex_state;
+  real<lower=0> var_race_age;
+  real<lower=0> var_race_education;
+  real<lower=0> var_race_state;
+  real<lower=0> var_age_education;
+  real<lower=0> var_age_state;
+  real<lower=0> var_education_state;
+} 
+model { 
+  // prior specifications:
+  // nu & sigma have vague improper uniform priors
+  // intercept:
+  a_0 ~ normal(0, sqrt(var_0));
+  var_0 ~ scaled_inv_chi_square(nu, sigma);
+  // one-group alphas:
+  a_sex ~ normal(0, sqrt(var_sex));
+  a_race ~ normal(0, sqrt(var_race));
+  a_age ~ normal(0, sqrt(var_age));
+  a_education ~ normal(0, sqrt(var_education));
+  a_state ~ normal(0, sqrt(var_state));
+  // one-group variances:
+  var_sex ~ scaled_inv_chi_square(nu, sigma);
+  var_race ~ scaled_inv_chi_square(nu, sigma);
+  var_age ~ scaled_inv_chi_square(nu, sigma);
+  var_education ~ scaled_inv_chi_square(nu, sigma);
+  var_state ~ scaled_inv_chi_square(nu, sigma);
+  // two-group alphas (interactions):
+  for (j in 1:NSex) {
+    a_sex_race[j,] ~ normal(0, sqrt(var_sex_race));
+    a_sex_age[j,] ~ normal(0, sqrt(var_sex_age));
+    a_sex_education[j,] ~ normal(0, sqrt(var_sex_education));
+    a_sex_state[j,] ~ normal(0, sqrt(var_sex_state));
+  }
+  for (k in 1:NRace) {
+    a_race_age[k,] ~ normal(0, sqrt(var_race_age));
+    a_race_education[k,] ~ normal(0, sqrt(var_race_education));
+    a_race_state[k,] ~ normal(0, sqrt(var_race_state));
+  }
+  for (l in 1:NAge) {
+    a_age_education[l,] ~ normal(0, sqrt(var_age_education));
+    a_age_state[l,] ~ normal(0, sqrt(var_age_state));
+  }
+  for (m in 1:NEducation) {
+    a_education_state[m,] ~ normal(0, sqrt(var_education_state));
+  }
+  // two-group variances:
+  var_sex_race ~ scaled_inv_chi_square(nu, sigma);
+  var_sex_age ~ scaled_inv_chi_square(nu, sigma);
+  var_sex_education ~ scaled_inv_chi_square(nu, sigma);
+  var_sex_state ~ scaled_inv_chi_square(nu, sigma);
+  var_race_age ~ scaled_inv_chi_square(nu, sigma);
+  var_race_education ~ scaled_inv_chi_square(nu, sigma);
+  var_race_state ~ scaled_inv_chi_square(nu, sigma);
+  var_age_education ~ scaled_inv_chi_square(nu, sigma);
+  var_age_state ~ scaled_inv_chi_square(nu, sigma);
+  var_education_state ~ scaled_inv_chi_square(nu, sigma);
+  
+  // response var:
+  for (i in 1:N) { 
+    y[i] ~ bernoulli_logit(a_0 + a_sex[sex[i]] + a_race[race[i]] 
+                           + a_age[age[i]] + a_education[education[i]] + a_state[state[i]]
+                           + a_sex_race[sex[i],race[i]] + a_sex_age[sex[i],age[i]]
+                           + a_sex_education[sex[i],education[i]] + a_sex_state[sex[i],state[i]]
+                           + a_race_age[race[i],age[i]] + a_race_education[race[i],education[i]] 
+                           + a_race_state[race[i],state[i]]
+                           + a_age_education[age[i],education[i]] + a_age_state[age[i],state[i]]
+                           + a_education_state[education[i],state[i]]
+                          );
+  }
+}
+generated quantities { 
+  real b_0;  // fixed effects intercept
+  // centered REs:
+  vector[NSex] b_sex;  
+  vector[NRace] b_race;
+  vector[NAge] b_age;
+  vector[NEducation] b_education;
+  vector[NState] b_state;
+  matrix[NSex,NRace] b_sex_race; 
+  matrix[NSex,NAge] b_sex_age;
+  matrix[NSex,NEducation] b_sex_education;
+  matrix[NSex,NState] b_sex_state;
+  matrix[NRace,NAge] b_race_age;
+  matrix[NRace,NEducation] b_race_education;
+  matrix[NRace,NState] b_race_state;
+  matrix[NAge,NEducation] b_age_education;
+  matrix[NAge,NState] b_age_state;
+  matrix[NEducation,NState] b_education_state;
+  
+  real mtrx[NSex,NRace,NAge,NEducation,NState];
+  
+  for (j in 1:NSex) {
+    for (k in 1:NRace) {
+      for (l in 1:NAge) {
+        for (m in 1:NEducation) {
+          for (n in 1:NState) {
+              mtrx[j,k,l,m,n] = a_0 + a_sex[j] + a_race[k] + a_age[l] +
+a_education[m] + a_state[n] + a_sex_race[j,k] + a_sex_age[j,l] + a_sex_education[j,m] + a_sex_state[j,n] + a_race_age[k,l] + a_race_education[k,m] + a_race_state[k,n] + a_age_education[l,m] + a_age_state[l,n] + a_education_state[m,n];
+          }
+        }
+      }
+    }
+  }
+  
+  // b_0
+  b_0 = a_0 + sum(a_sex)/NSex + sum(a_race)/NRace + sum(a_age)/NAge 
+        + sum(a_education)/NEducation + sum(a_state)/NState
+        + sum(a_sex_race)/NSex/NRace + sum(a_sex_age)/NSex/NAge
+        + sum(a_sex_education)/NSex/NEducation + sum(a_sex_state)/NSex/NState
+        + sum(a_race_age)/NRace/NAge + sum(a_race_education)/NRace/NEducation 
+        + sum(a_race_state)/NRace/NState + sum(a_age_education)/NAge/NEducation
+        + sum(a_age_state)/NAge/NState + sum(a_education_state)/NEducation/NState;
+  // b_sex
+  for (j in 1:NSex) {
+    b_sex[j] = 0;
+    for (k in 1:NRace) {
+      for (l in 1:NAge) {
+        for (m in 1:NEducation) {
+          for (n in 1:NState) {
+              b_sex[j] = b_sex[j] + mtrx[j,k,l,m,n];
+          }
+        }
+      }
+    }
+    b_sex[j] = b_sex[j]/NRace/NAge/NEducation/NState - b_0;
+  }
+  // b_race
+  for (k in 1:NRace) {
+    b_race[k] = 0;
+    for (j in 1:NSex) {
+      for (l in 1:NAge) {
+        for (m in 1:NEducation) {
+          for (n in 1:NState) {
+              b_race[k] = b_race[k] + mtrx[j,k,l,m,n];
+          }
+        }
+      }
+    }
+    b_race[k] = b_race[k]/NSex/NAge/NEducation/NState - b_0;
+  }
+  // b_age
+  for (l in 1:NAge) {
+    b_age[l] = 0;
+    for (j in 1:NSex) {
+      for (k in 1:NRace) {
+        for (m in 1:NEducation) {
+          for (n in 1:NState) {
+              b_age[l] = b_age[l] + mtrx[j,k,l,m,n];
+          }
+        }
+      }
+    }
+    b_age[l] = b_age[l]/NSex/NRace/NEducation/NState - b_0;
+  }
+  // b_education
+  for (m in 1:NEducation) {
+    b_education[m] = 0;
+    for (j in 1:NSex) {
+      for (k in 1:NRace) {
+        for (l in 1:NAge) {
+          for (n in 1:NState) {
+              b_education[m] = b_education[m] + mtrx[j,k,l,m,n];
+          }
+        }
+      }
+    }
+    b_education[m] = b_education[m]/NSex/NRace/NAge/NState - b_0;
+  }
+  // b_state
+  for (n in 1:NState) {
+    b_state[n] = 0;
+    for (j in 1:NSex) {
+      for (k in 1:NRace) {
+        for (l in 1:NAge) {
+          for (m in 1:NEducation) {
+              b_state[n] = b_state[n] + mtrx[j,k,l,m,n];
+          }
+        }
+      }
+    }
+    b_state[n] = b_state[n]/NSex/NRace/NAge/NEducation - b_0;
+  }
+  
+  // interactions
+  // b_sex_race
+  for (j in 1:NSex) { for (k in 1:NRace) {
+      b_sex_race[j,k] = 0;
+      for (l in 1:NAge) {
+        for (m in 1:NEducation) {
+          for (n in 1:NState) {
+              b_sex_race[j,k] = b_sex_race[j,k] + mtrx[j,k,l,m,n];
+          }
+        }
+      }
+      b_sex_race[j,k] = b_sex_race[j,k]/NAge/NEducation/NState - b_0 - b_sex[j] - b_race[k];
+    }
+  }
+  // b_sex_age
+  for (j in 1:NSex) { for (l in 1:NAge) {
+      b_sex_age[j,l] = 0;
+      for (k in 1:NRace) {
+        for (m in 1:NEducation) {
+          for (n in 1:NState) {
+              b_sex_age[j,l] = b_sex_age[j,l] + mtrx[j,k,l,m,n];
+          }
+        }
+      }
+      b_sex_age[j,l] = b_sex_age[j,l]/NRace/NEducation/NState - b_0 - b_sex[j] - b_age[l];
+    }
+  }
+  // b_sex_education
+  for (j in 1:NSex) { for (m in 1:NEducation) {
+      b_sex_education[j,m] = 0;
+      for (k in 1:NRace) {
+        for (l in 1:NAge) {
+          for (n in 1:NState) {
+              b_sex_education[j,m] = b_sex_education[j,m] + mtrx[j,k,l,m,n];
+          }
+        }
+      }
+      b_sex_education[j,m] = b_sex_education[j,m]/NRace/NAge/NState - b_0 - b_sex[j] - b_education[m];
+    }
+  }
+  // b_sex_state
+  for (j in 1:NSex) { for (n in 1:NState) {
+      b_sex_state[j,n] = 0;
+      for (k in 1:NRace) {
+        for (l in 1:NAge) {
+          for (m in 1:NEducation) {
+              b_sex_state[j,n] = b_sex_state[j,n] + mtrx[j,k,l,m,n];
+          }
+        }
+      }
+      b_sex_state[j,n] = b_sex_state[j,n]/NRace/NAge/NEducation - b_0 - b_sex[j] - b_state[n];
+    }
+  }
+
+  // b_race_age
+  for (k in 1:NRace) { for (l in 1:NAge) {
+      b_race_age[k,l] = 0;
+      for (j in 1:NSex) {
+        for (m in 1:NEducation) {
+          for (n in 1:NState) {
+              b_race_age[k,l] = b_race_age[k,l] + mtrx[j,k,l,m,n];
+          }
+        }
+      }
+      b_race_age[k,l] = b_race_age[k,l]/NSex/NEducation/NState - b_0 - b_race[k] - b_age[l];
+    }
+  }
+  // b_race_education
+  for (k in 1:NRace) { for (m in 1:NEducation) {
+      b_race_education[k,m] = 0;
+      for (j in 1:NSex) {
+        for (l in 1:NAge) {
+          for (n in 1:NState) {
+              b_race_education[k,m] = b_race_education[k,m] + mtrx[j,k,l,m,n];
+          }
+        }
+      }
+      b_race_education[k,m] = b_race_education[k,m]/NSex/NAge/NState - b_0 - b_race[k] - b_education[m];
+    }
+  }
+  // b_race_state
+  for (k in 1:NRace) { for (n in 1:NState) {
+      b_race_state[k,n] = 0;
+      for (j in 1:NSex) {
+        for (l in 1:NAge) {
+          for (m in 1:NEducation) {
+              b_race_state[k,n] = b_race_state[k,n] + mtrx[j,k,l,m,n];
+          }
+        }
+      }
+      b_race_state[k,n] = b_race_state[k,n]/NSex/NAge/NEducation - b_0 - b_race[k] - b_state[n];
+    }
+  }
+  
+  // b_age_education
+      for (l in 1:NAge) { for (m in 1:NEducation) {
+      b_age_education[l,m] = 0;
+      for (j in 1:NSex) {
+        for (k in 1:NRace) {
+          for (n in 1:NState) {
+              b_age_education[l,m] = b_age_education[l,m] + mtrx[j,k,l,m,n];
+          }
+        }
+      }
+      b_age_education[l,m] = b_age_education[l,m]/NSex/NRace/NState - b_0 - b_age[l] - b_education[m];
+    }
+  }
+  // b_age_state
+  for (l in 1:NAge) { for (n in 1:NState) {
+      b_age_state[l,n] = 0;
+      for (j in 1:NSex) {
+        for (k in 1:NRace) {
+          for (m in 1:NEducation) {
+              b_age_state[l,n] = b_age_state[l,n] + mtrx[j,k,l,m,n];
+          }
+        }
+      }
+      b_age_state[l,n] = b_age_state[l,n]/NSex/NRace/NEducation - b_0 - b_age[l] - b_state[n];
+    }
+  }
+  
+  // b_education_state
+  for (m in 1:NEducation) { for (n in 1:NState) {
+      b_education_state[m,n] = 0;
+      for (j in 1:NSex) {
+        for (k in 1:NRace) {
+          for (l in 1:NAge) {
+              b_education_state[m,n] = b_education_state[m,n] + mtrx[j,k,l,m,n];
+          }
+        }
+      }
+      b_education_state[m,n] = b_education_state[m,n]/NSex/NRace/NAge - b_0 - b_education[m] - b_state[n];
+    }
+  }
+}
+"
+```
+
+3. Run MCMC using rstan and parallel programming on RCC cluster. 
+```{r, eval = FALSE}
+library (rstan)
+rstan_options(auto_write = TRUE)
+
+library(doParallel)
+registerDoParallel(cores=(Sys.getenv("SLURM_NTASKS_PER_NODE")))
+
+model = stan_model(file=modelString)
+
+pars=c('b_0','b_sex', 'b_race', 'b_age', 'b_education', 'b_state',
+       'b_sex_race', 'b_sex_age', 'b_sex_education', 'b_sex_state',
+       'b_race_age', 'b_race_education', 'b_race_state', 'b_age_education',        'b_age_state', 'b_education_state','var_0', 'var_sex', 'var_race',
+       'var_age', 'var_education', 'var_state', 'var_sex_race',
+       'var_sex_age', 'var_sex_education', 'var_sex_state', 'var_race_age',        'var_race_education', 'var_race_state', 'var_age_education',
+       'var_age_state', 'var_education_state', 'nu', 'sigma')
+
+obama_fit <- sampling(model, data=dataList, pars=pars,
+                      control=list(adapt_delta=0.99, max_treedepth=12),
+                      iter=9000, chains = 4, cores = 4, verbose = F)
+
+save(obama_fit, file="./finalProjectFit.Rdata")
+```
+
+4. Analyze fitted model
+```{r}
+load(paste0(dataPath, "finalProjectFit.Rdata"))
+
+library(rstan)
+library(shinystan)
+
+fit_ext = rstan::extract(obama_fit)
+sum.obama_fit = summary(obama_fit)$summary
+
+#List of all parameter names
+head(rownames(sum.obama_fit))
+
+#Plot parameter estimation
+plot(obama_fit,pars=c("b_0"))
+plot(obama_fit,pars=c("b_sex"))
+plot(obama_fit,pars=c("b_race"))
+plot(obama_fit,pars=c("b_age"))
+
+#Select significant parameters according to 95% HDI
+param.sig       = data.frame(sum.obama_fit[, c(1, 4, 8)])
+param.sig$isSig = apply(param.sig, 1, function(z) !(z[2] <= 0 & z[3] >= 0))
+selection       = rownames(param.sig)[param.sig[, 4] == TRUE]
+param.sig       = param.sig[selection, ]
+dim(param.sig)
+```
+**Comment:** Based on 95% HDI interval, there are 55 significant features out of 870 parameters. From the plots, we can see the estimated intercept is close to 0.5 and the summation of estimated parameters within the same category is zero. For example, estimated values for male and female added up to zero. Such estimation makes sense in predicting a binary response.\
+\
+**4.1 Find groups from which the main support for Obama came in 2012**
+```{r}
+#Filter positive parameters 
+param.sig[rownames(param.sig[param.sig[, 1] > 0, ]), ]
+```
+**Comment:** The estimated parameters with positive values are the supporters within each category, for example, in sex category, male = -0.11 and female = 0.11 thus female is the major support. From the result, the main support for Obama are female gender, race of black, aging from 18 to 34, 5 democratic and 3 republican states. The estimated value for race-black group is 2.3, the largest of all parameters in terms of value, indicating people of race black are strong supporters of Obama. There are also some interaction features having considerably large estimated values, which are also strong support for Obama. There interaction features include senior female, white seniors, young minorities in terms of race and highly-educated white. All the results are resonable and matches the actual voter backgrounds.\
+\
+**4.2 Find groups of the lowest odds of approval**
+```{r}
+odds = exp(as.matrix(param.sig)[, 1])
+baseline = odds[1]
+odds = odds * baseline
+
+lowOdds = odds[odds < baseline]
+(lowOdds = lowOdds[order(lowOdds)])
+```
+**Comment:** There are 27 groups having odds ratio below the baseline, including 16 no-interaction features and 11 features with interaction. Overall, race of white has the lowest odds of approval. \
+In the case of no interaction and odds ratio = 1 as threshold, the follwoing groups have low rate of approval: race other than black, 3 states including AZ, MI and WI.\
+In case of allowing interaction, white in WI, AZ, AR, IL and MI, young black have low rate of approval.\
+\
+**4.3 Search for information on main support and no support for Hillary Clinton in 2016 and try to identify the dynamics between 2012 and 2016.**\
+**Comment:** From our result, the main support for Obama 2012 are female, black, strong democratic states including WA, PA, DE, FL, NV and WV,  republican states including TN, NE and WV. There are also strong supports from white seniors, highly-educated white and young minorities. \
+For Hilary in 2016, according to http://www.people-press.org/2016/07/07/2-voter-general-election-preferences/, the major support group include female, black and hispanic, highly educated white and young people. The main support group remains similar except for few differences. Hilary gained a competitive amount of white supporters while did not gain much support from non-democratic states as Obama did in 2012.\
+\
+**4.4 What else you find interesting in the results?**\
+```{r}
+highOdds = odds[odds > baseline]
+(highOdds = highOdds[order(highOdds)])
+```
+**Comment:** It is interesting that the rate of approval when each demographic category is considered independently is very different from when interaction is allowed. For example, when sex and race are considered seperately, male and white groups are less favorable towards Obama. However, when interaction is allowed, that is white male as a single group, the odds of approval becomes high immediately. This proves synergy effect in election and we should always look into interaction demographics rather than consider each demographic category as independent.

@@ -1,0 +1,161 @@
+---
+title: "msca32014_hw4"
+author: "Zhiyin Shi"
+date: "April 24, 2017"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+Binomial output with two groups\
+Consider problem of identifying responses of two gender groups (column sex).\
+Decide what is the right model and analyze it using JAGS.\
+Consider different prior distributions.\
+
+##0. Import related sources and data
+```{r}
+sourcePath = "/Users/JaneShi/Desktop/MSCA32014/DBDA2EPrograms2"
+suppressWarnings(source(paste(sourcePath,"DBDA2E-utilities.R",sep="/")))
+
+dataPath   = "/Users/JaneShi/Desktop/MSCA32014/Lecture4/HW4/"
+data       = read.csv(paste(dataPath, "CourseProjectData.csv", sep = "/"))
+
+sex        = as.numeric(data$sex)
+thisdata   = data.frame(cbind(y = data[, 6], sex = sex))
+y.male     = thisdata[thisdata$sex == 1, 1]
+y.female   = thisdata[thisdata$sex == 2, 1]
+tot.male   = length(y.male)
+tot.female = length(y.female)
+
+dataList.male   = list(y = y.male,   Ntotal = tot.male)
+dataList.female = list(y = y.female, Ntotal = tot.female)
+
+(MLE.meanMale   = sum(y.male)/tot.male)
+(MLE.meanFemale = sum(y.female)/tot.female)
+```
+
+##1. Modeling with different prior distributions for male and female
+1.1 Model Description
+```{r}
+modelString.SingleModel1=" 
+model {
+  for (i in 1:Ntotal) {
+    y[i]~dbern(theta)
+  }
+  theta~dbeta(2,2)
+}
+"
+writeLines( modelString.SingleModel1 , con="TEMPmodelSingle.txt" )
+```
+
+1.2 Initilization function
+```{r}
+initsList = function(y) {
+  resampledY = sample(y, replace=TRUE ) # resample
+  thetaInit  = sum(resampledY)/length(resampledY) 
+  thetaInit  = 0.001+0.998*thetaInit # keep away from 0,1
+  return( list( theta=thetaInit ) )
+}
+
+initsList(y.male)
+initsList(y.female)
+```
+
+1.3 Run MCMC with JAGS for Male Group
+```{r}
+library(rjags)
+jagsModel1 = jags.model(file = "TEMPmodelSingle.txt", data = dataList.male,
+                      n.chains= 3, n.adapt= 600, inits= initsList(y.male))
+
+codaSamples = coda.samples(jagsModel1, variable.names = c("theta"), 
+                           n.iter = 4000)
+```
+
+1.4 Analyze the result for male group
+```{r}
+head(codaSamples)
+
+#Check summary statistics
+summary(codaSamples)
+
+#Check trace and density of theta
+plot(codaSamples)
+
+#Check theta autocorrelation
+effectiveSize(codaSamples)
+
+#Check sufficiency of convergence through shrinkage factor
+gelman.plot(codaSamples)
+
+#Create posterior theta distribution plot
+postHistChain1 = hist(unlist(codaSamples[1]), plot = FALSE)
+postHistChain2 = hist(unlist(codaSamples[2]), plot = FALSE)
+postHistChain3 = hist(unlist(codaSamples[3]), plot = FALSE)
+
+plot(postHistChain1$mids, postHistChain1$density, type= "l", col = "black",
+     lwd= 2, ylim =c(0,120), ylab = "Distribution Density", xlab = "Theta")
+lines(postHistChain2$mids, postHistChain2$density, type="l", col="red",
+      lwd=2)
+lines(postHistChain3$mids, postHistChain3$density, type="l", col="blue",
+      lwd=2)
+lines(postHistChain3$mids, dbeta(postHistChain3$mids, 1 + sum(y.male),
+      tot.male- sum(y.male) + 1), type = "l", col = "green", lwd = 3)
+legend("topright", legend = c("Chain1","Chain2","Cahin3","Theoretical"),
+       col = c("black","red","blue","green"), lwd = 2)
+
+```
+**Comment:** The prior distribution in male group is assumed to be beta(2,2). By running MCMC with JAGS, the three chains each with 4000 iterations resulted in mean = 0.3405 and sd = 0.0050. The trace plot as well as gelman plot show great convergence. The density plot of posterior theta distribution shows bell-shape with fat tail. The effective size is 11807.23, indicating nearly no autocorrelation among theta. Comparing theta distribution of each chain with the theoretical distribution, the MCMC gets a very good result.\
+\
+1.5 Run MCMC with JAGS for Female Group
+```{r}
+modelString.SingleModel2=" 
+model {
+  for (i in 1:Ntotal) {
+    y[i]~dbern(theta)
+  }
+  theta~dbeta(3,3)
+}
+"
+writeLines(modelString.SingleModel2, con="TEMPmodelSingle.txt" )
+
+jagsModel2 = jags.model(file= "TEMPmodelSingle.txt", data= dataList.female,
+                    n.chains= 3, n.adapt= 600, inits= initsList(y.female))
+
+codaSamples = coda.samples(jagsModel2, variable.names = c("theta"), 
+                           n.iter = 4000)
+```
+
+1.6 Analyze the result for Female Group
+```{r}
+head(codaSamples)
+
+#Check summary statistics
+summary(codaSamples)
+
+#Check trace and density of theta
+plot(codaSamples)
+
+#Check theta autocorrelation
+effectiveSize(codaSamples)
+
+#Check sufficiency of convergence through shrinkage factor
+gelman.plot(codaSamples)
+
+#Create posterior theta distribution plot
+postHistChain1 = hist(unlist(codaSamples[1]), plot = FALSE)
+postHistChain2 = hist(unlist(codaSamples[2]), plot = FALSE)
+postHistChain3 = hist(unlist(codaSamples[3]), plot = FALSE)
+
+plot(postHistChain1$mids, postHistChain1$density, type= "l", col = "black",
+     lwd= 2, ylim =c(0,120), ylab = "Distribution Density", xlab = "Theta")
+lines(postHistChain2$mids, postHistChain2$density, type="l", col="red",
+      lwd=2)
+lines(postHistChain3$mids, postHistChain3$density, type="l", col="blue",
+      lwd=2)
+lines(postHistChain3$mids, dbeta(postHistChain3$mids, 1 + sum(y.female),
+      tot.female- sum(y.female) + 1), type = "l", col = "green", lwd = 3)
+legend("topright", legend = c("Chain1","Chain2","Cahin3","Theoretical"),
+       col = c("black","red","blue","green"), lwd = 2)
+```
+**Comment:** The prior distribution in female group is assumed to be beta(3,3). By running MCMC with JAGS, the three chains each with 4000 iterations resulted in mean = 0.3826 and sd = 0.0040. The trace plot as well as gelman plot show great convergence. The density plot of posterior theta distribution shows bell-shape with fat tail. The effective size is 12000, indicating no autocorrelation among theta. Comparing theta distribution of each chain with the theoretical distribution, the MCMC gets a very good result.

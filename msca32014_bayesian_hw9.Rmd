@@ -1,0 +1,269 @@
+---
+title: "msca32014_hw9"
+author: "Zhiyin Shi"
+date: "May 30, 2017"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+###0. Import Data
+```{r}
+suppressWarnings(source('/Users/JaneShi/Desktop/MSCA32014/DBDA2Eprograms2/DBDA2E-utilities.R'))  # use function gammaShRaFromModeSD()
+
+anvDat = read.csv("/Users/JaneShi/Desktop/MSCA32014/Lecture9/AnovaShrinkageData.csv")
+
+table(anvDat$Group)
+
+grMeans = aggregate(Y ~ Group, anvDat, mean)
+plot(grMeans)
+
+head(anvDat)
+```
+
+###1. Model with estimated hyper-parameter
+1.1. Fit model described on the diagram.\
+Recenter coefficients so that they add up to 0.\
+Set up the following contrasts:\
+U vs. A\
+M vs. A\
+G vs. A
+```{r}
+suppressWarnings(library(rstan))
+
+#Set up dataList
+dataList= list(Ntotal = nrow(anvDat), y = anvDat$Y,
+               x = as.integer(anvDat$Group), NxLvl = nlevels(anvDat$Group),
+               agammaShRa=unlist(gammaShRaFromModeSD(mode=sd(anvDat$Y)/2,
+                                                  sd=2*sd(anvDat$Y)))
+)
+
+modelString<-"
+data {
+    int<lower=1> Ntotal;
+    real y[Ntotal];
+    int<lower=2> NxLvl;
+    int<lower=1, upper=NxLvl> x[Ntotal];
+    real<lower=0> agammaShRa[2];
+}
+transformed data {
+    real meanY;
+    real sdY;
+    meanY = mean(y);
+    sdY = sd(y);
+}
+parameters {
+    real a0;
+    real<lower=0> aSigma;
+    vector[NxLvl] a;
+    real<lower=0> ySigma;
+}
+model {
+    a0 ~ normal(meanY, 5*sdY);
+    aSigma ~ gamma(agammaShRa[1], agammaShRa[2]);
+    a ~ normal(0, aSigma);
+    ySigma ~ uniform(sdY/100, sdY*10);
+    for ( i in 1:Ntotal ) {
+        y[i] ~ normal(a0 + a[x[i]], ySigma);
+    }
+}
+generated quantities {
+    // Convert a0,a[] to sum-to-zero b0,b[] :
+        real b0;
+    vector[NxLvl] b;
+    b0 = a0 + mean(a);
+    b = a - mean(a);
+}"
+
+#Set up stan model
+stanDso = stan_model( model_code=modelString )
+
+#Set up MCMC model
+fit = sampling(stanDso, 
+                data=dataList, 
+                pars=c('b0', 'b', 'aSigma', 'ySigma'),
+                iter=5000, chains = 2, cores = 2)
+
+#Analyze result
+library(shinystan)
+launch_shinystan(fit)
+
+summary(fit)$summary[,c(1,4,6,8,10)]
+cbind(GroupMeans=grMeans,EstimatedMeans=summary(fit)$summary[2:22,1]+summary(fit)$summary[1,1])
+plot(fit)
+plot(fit,pars=c("b"))
+stan_dens(fit)
+
+#Build up contrasts
+fit_ext <- rstan::extract(fit)
+head(fit_ext$b)
+```
+1.2. Do any of these contrasts suggest significant differences between the groups?
+```{r}
+suppressWarnings(library(HDInterval))
+
+#Contrast U vs A
+contrast_U_A = fit_ext$b[,1] - fit_ext$b[,21]
+plot(contrast_U_A)
+hist(contrast_U_A)
+(hdiContrast_U_A<-hdi(contrast_U_A))
+(sd.contrast_U_A<-sd(contrast_U_A))
+(grMean.diff_U_A<-grMeans[grMeans$Group == "U",2] - grMeans[grMeans$Group == "A",2])
+plot(rank(fit_ext$b[,1]),rank(fit_ext$b[,21]))
+
+#Contrast M vs A
+contrast_M_A <- fit_ext$b[,1] - fit_ext$b[,13]
+plot(contrast_M_A)
+hist(contrast_M_A)
+(hdiContrast_M_A<-hdi(contrast_M_A))
+(sd.contrast_M_A<-sd(contrast_M_A))
+(grMean.diff_M_A<-grMeans[grMeans$Group == "M",2] - grMeans[grMeans$Group == "A",2])
+plot(rank(fit_ext$b[,1]),rank(fit_ext$b[,13]))
+
+#Constrast G vs A
+contrast_G_A <- fit_ext$b[,1] - fit_ext$b[,7]
+plot(contrast_G_A)
+hist(contrast_G_A)
+(hdiContrast_G_A<-hdi(contrast_G_A))
+(sd.contrast_G_A<-sd(contrast_G_A))
+(grMean.diff_G_A<-grMeans[grMeans$Group == "G",2] - grMeans[grMeans$Group == "A",2])
+plot(rank(fit_ext$b[,1]),rank(fit_ext$b[,7]))
+```
+**Comment:** The contrasts suggest significant difference between U & A and M & A. \
+\
+1.3. For each pair what is the estimated contrast? Compare estimated contrasts with the corresponding group mean differences.
+```{r}
+est.contrast_U_A<-mean(contrast_U_A)
+est.contrast_M_A<-mean(contrast_M_A)
+est.contrast_G_A<-mean(contrast_G_A)
+
+res = cbind(c(abs(est.contrast_U_A), abs(est.contrast_M_A), 
+              abs(est.contrast_G_A)),
+            c(grMean.diff_U_A, grMean.diff_M_A, grMean.diff_G_A))
+colnames(res) = c("contrast", "actual")
+rownames(res) = c("U_A", "M_A","G_A")
+res
+```
+**Comment:** The estimated contrasts are underestimated, but not much.
+
+###2 Model without hyper-parameter
+2.1. Modify the model so that σασα is not estimated from the data. Fit this model
+```{r}
+dataList= list(Ntotal = nrow(anvDat), y = anvDat$Y,
+               x = as.integer(anvDat$Group), NxLvl = nlevels(anvDat$Group))
+
+
+modelString1<-"
+data {
+    int<lower=1> Ntotal;
+    real y[Ntotal];
+    int<lower=2> NxLvl;
+    int<lower=1, upper=NxLvl> x[Ntotal];
+}
+transformed data {
+    real meanY;
+    real sdY;
+    meanY = mean(y);
+    sdY = sd(y);
+}
+parameters {
+    real a0;
+    vector[NxLvl] a;
+    real<lower=0> ySigma;
+}
+model {
+    a0 ~ normal(meanY, 5*sdY);
+    a ~ normal(0, 2*sdY);
+    ySigma ~ uniform(sdY/100, sdY*10);
+    for ( i in 1:Ntotal ) {
+        y[i] ~ normal(a0 + a[x[i]], ySigma);
+    }
+}
+generated quantities {
+    // Convert a0,a[] to sum-to-zero b0,b[] :
+    real b0;
+    vector[NxLvl] b;
+    b0 = a0 + mean(a);
+    b = a - mean(a);
+}"
+
+#Set up stan model
+stanDso = stan_model( model_code=modelString1)
+
+#Set up MCMC model
+fit = sampling(stanDso, 
+                data=dataList, 
+                pars=c('b0', 'b', 'ySigma'),
+                iter=5000, chains = 2, cores = 2)
+
+#Analyze result
+library(shinystan)
+#launch_shinystan(fit)
+
+summary(fit)$summary[,c(1,4,6,8,10)]
+cbind(GroupMeans=grMeans,EstimatedMeans=summary(fit)$summary[2:22,1]+summary(fit)$summary[1,1])
+stan_ac(fit, separate_chains = T)
+plot(fit)
+plot(fit,pars=c("b"))
+stan_dens(fit)
+
+#Build up contrasts
+fit_ext <- rstan::extract(fit)
+head(fit_ext$b)
+
+```
+**Comment:** As we can see, the estimation of mean is more accurate to the true values.\
+\
+2.2. Do any of these contrasts suggest significant differences between the groups?
+```{r}
+#Contrast U vs A
+contrast_U_A = fit_ext$b[,1] - fit_ext$b[,21]
+plot(contrast_U_A)
+hist(contrast_U_A)
+(hdiContrast_U_A<-hdi(contrast_U_A))
+(sd.contrast_U_A<-sd(contrast_U_A))
+(grMean.diff_U_A<-grMeans[grMeans$Group == "U",2] - grMeans[grMeans$Group == "A",2])
+plot(rank(fit_ext$b[,1]),rank(fit_ext$b[,21]))
+
+#Contrast M vs A
+contrast_M_A <- fit_ext$b[,1] - fit_ext$b[,13]
+plot(contrast_M_A)
+hist(contrast_M_A)
+(hdiContrast_M_A<-hdi(contrast_M_A))
+(sd.contrast_M_A<-sd(contrast_M_A))
+(grMean.diff_M_A<-grMeans[grMeans$Group == "M",2] - grMeans[grMeans$Group == "A",2])
+plot(rank(fit_ext$b[,1]),rank(fit_ext$b[,13]))
+
+#Constrast G vs A
+contrast_G_A <- fit_ext$b[,1] - fit_ext$b[,7]
+plot(contrast_G_A)
+hist(contrast_G_A)
+(hdiContrast_G_A<-hdi(contrast_G_A))
+(sd.contrast_G_A<-sd(contrast_G_A))
+(grMean.diff_G_A<-grMeans[grMeans$Group == "G",2] - grMeans[grMeans$Group == "A",2])
+plot(rank(fit_ext$b[,1]),rank(fit_ext$b[,7]))
+```
+**Comment:** There are significant contrasts among all three pairs.\
+\
+2.3. For each pair what is the estimated contrast? Compare estimated contrasts with the corresponding group mean differences.
+```{r}
+est.contrast_U_A<-mean(contrast_U_A)
+est.contrast_M_A<-mean(contrast_M_A)
+est.contrast_G_A<-mean(contrast_G_A)
+
+res = cbind(c(abs(est.contrast_U_A), abs(est.contrast_M_A), 
+              abs(est.contrast_G_A)),
+            c(grMean.diff_U_A, grMean.diff_M_A, grMean.diff_G_A))
+colnames(res) = c("contrast", "actual")
+rownames(res) = c("U_A", "M_A","G_A")
+res
+```
+**Comment:** From the result, we can see much more accurate estimation of contrasts.
+
+
+
+
+
+```
