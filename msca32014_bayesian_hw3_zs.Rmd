@@ -1,0 +1,210 @@
+---
+title: "msca32014_hw3"
+author: "Zhiyin Shi"
+date: "April 18, 2017"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+This project helps understanding beta prior distribution for binomial data
+
+#Estimating the Risk of Tumor in a Group of Rats
+In example from Section 5.1 the goal was estimation of the probability theta of tumor in a population of female laboratory rats of type “F344” that receive a zero dose of the drug (control group).\
+\
+In the experiment 4 out of 14 rats developed a tumor.
+```{r}
+Data<-c(s=14,k=4)
+```
+
+Select binomial model yi∼Binom(theta) with probability of tumor theta and beta prior distribution for the parameter theta∼Beta(alpha, beta).\
+\
+Suppose we know from historical observation of population of “F344” the mean and the variance of beta distribution for theta.\
+
+Using formulas in the interactive demonstration of beta distribution convert mean value miu=0.136 and standard deviation sig=0.1034 of observed empirical probabilities into shapes of beta distribution alpha, beta.\
+```{r}
+miu = 0.136
+sig = 0.1034
+commonPart = miu * (1 - miu) / (sig ^ 2) - 1
+alpha = miu * commonPart
+beta  = (1 - miu) * commonPart
+(prior = c(a = alpha, b = beta))
+```
+
+Note that this is not a Bayesian approach since it is not based on probability model.\
+Calculate parameters of posterior distribution.
+```{r}
+(posterior<-c(prior[1] + Data[2], Data[1] - Data[2] + prior[2]))
+```
+
+Compare prior and posterior distributions and interpret the difference.
+```{r}
+theta = seq(0,1,length=1000)
+matplot(theta, cbind(dbeta(theta,prior[1],prior[2]),
+                     dbeta(theta,posterior[1],posterior[2])),
+        type = "l", lty = 1, ylab = "prior / posterior distribution")
+
+legend("topright",legend =c("prior","posterior"),lty=1,col=c("blue","red"))
+
+#Compare
+(empiricalTheta = Data[2] / Data[1])
+```
+**Comment:** From experiment, empirical theta = 0.286. The mode of prior distribution of theta is less 0.1 which is biased a lot. The posterior is more than 0.2, which is getting closer to the empirical theta value. So the poterior distribution is moving towards the true distribution.\
+\
+Assume that probability of tumor in control group is concentrated around unknown mode ω of beta distribution with concentration level of 20.\
+ω∼Beta(Aω,Bω)\
+Belief based on historical observations is that parameter ω has a tendency to be around 0.4 with concentration 12.\
+Use grid approximation to find posterior distribution.\
+\
+Prior for omega
+```{r}
+theta   = omega = seq( 0 , 1 , length = 100)
+A_omega = 0.4 * (12 - 2) + 1
+B_omega = 12 - A_omega
+
+plot(theta, dbeta(theta, A_omega, B_omega))
+```
+
+Concentration of theta
+```{r}
+K = 20
+```
+
+Define joint prior function
+```{r}
+jointPrior<-function(theta, omega, A_omega, B_omega, K){
+  res = dbeta(omega, A_omega, B_omega) *
+        dbeta(theta, omega * (K-2) + 1, (1 - omega) * (K-2) + 1)
+  return(res)
+}
+```
+
+Calculate joint prior
+```{r}
+dens = expand.grid(theta, omega)
+colnames(dens) = c("theta","omega")
+
+dens$prior = apply(dens, 1, function(z) jointPrior(z[1], z[2], A_omega,
+                                                    B_omega, K))
+prior.theta.omega = matrix(dens$prior, 100, 100)
+prior.theta.omega = prior.theta.omega / sum(prior.theta.omega)
+```
+
+Calculate marginals and plot distributions
+```{r}
+#Mariginal of omega
+prior.omega.marginal = apply(prior.theta.omega, 2, sum)
+prior.omega.marginal = prior.omega.marginal/sum(prior.omega.marginal) * 100
+
+matplot(omega, cbind(prior.omega.marginal, dbeta(omega, A_omega,
+        B_omega)), type = "l", ylab = "Marginal p(omega)")
+
+#Marginal of theta
+prior.theta.marginal = apply(prior.theta.omega, 1, sum)
+prior.theta.marginal = prior.theta.marginal/sum(prior.theta.marginal) *100 
+
+plot(theta, prior.theta.marginal, type = "l", ylab = "Marginal p(theta)")
+
+#Joint distributoin of theta and omega
+persp(theta, omega, prior.theta.omega, d = 1, theta = -25, phi = 20, 
+      main="Joint Prior Distribution")
+
+contour(x = omega, y = theta, z = prior.theta.omega, ylab = "omega", 
+        xlab = "theta", main="Joint Prior Distribution")
+```
+
+Show dependence of theta on omega. Plot 
+```{r}
+par(mfrow=c(3,1))
+
+#Omega = 0.25
+prior.theta.omega.25 = jointPrior(theta, 0.25, A_omega, B_omega, K)
+prior.theta.omega.25 = prior.theta.omega.25/sum(prior.theta.omega.25) *100
+
+plot(theta, prior.theta.omega.25, type = "l", ylab = "p(theta|omega=0.25)",
+     main = "Marginal prior for Theta")
+
+#Omega = 0.5
+prior.theta.omega.5 = jointPrior(theta, 0.5, A_omega, B_omega, K)
+prior.theta.omega.5 = prior.theta.omega.5 / sum(prior.theta.omega.5) * 100
+
+plot(theta, prior.theta.omega.5, type = "l", ylab="p(theta|omega=0.5)")
+
+#Omega = 0.75
+prior.theta.omega.75 = jointPrior(theta, 0.75, A_omega, B_omega, K)
+prior.theta.omega.75 = prior.theta.omega.75 /sum(prior.theta.omega.75) *100
+
+plot(theta, prior.theta.omega.75, type = "l", ylab = "p(theta|omega=0.75)")
+```
+
+
+Calculate likelihood with data of k = 4, s = 14
+```{r}
+par(mfrow=c(1,1))
+
+likeli = function(theta, s, k){
+  theta ^ k * (1 - theta) ^ (s - k)
+}
+
+likelihood = likeli(theta, 14, 4)
+
+plot(theta, likelihood, type = "l", ylab = "p(y|theta)", main="Likelihood")
+```
+
+Joint posterior distribution and its marginals
+```{r}
+posterior = apply(prior.theta.omega, 2, function(z) z * likelihood)
+posterior = posterior / sum(posterior)
+
+persp(theta, omega, posterior, d = 1, theta = -25, phi = 20, 
+      main = "Joint Posterior Distribution")
+
+contour(x = omega, y = theta, z = posterior, ylab = "omega", 
+        xlab = "theta", main = "Joint Posterior Distribution")
+
+posterior.omega.marginal = apply(posterior, 2, sum)
+posterior.omega.marginal = posterior.omega.marginal /
+                           sum(posterior.omega.marginal) * 100
+
+plot(omega, posterior.omega.marginal, type = "l")
+
+posterior.theta.marginal = apply(posterior, 1, sum)
+posterior.theta.marginal = posterior.theta.marginal /
+                           sum(posterior.theta.marginal) * 100
+
+plot(theta, posterior.theta.marginal, type = "l")
+```
+
+Show dependence of theta on omega. 
+```{r}
+par(mfrow=c(3,1))
+
+#Omega=0.25
+post.theta.omega.25 = posterior[, 26]
+post.theta.omega.25 = post.theta.omega.25 / sum(post.theta.omega.25) * 100
+
+plot(theta, post.theta.omega.25, type = "l", 
+     ylab = "p(theta|omega=0.25,y)", main = "Marginal posterior for Theta")
+
+#Omega=0.5
+post.theta.omega.5 = posterior[, 50]
+post.theta.omega.5 = post.theta.omega.5 / sum(post.theta.omega.5) * 100
+
+plot(theta, post.theta.omega.5, type = "l", ylab = "p(theta|omega=0.5,y)")
+
+#Omega=0.75
+post.theta.omega.75 = posterior[, 75]
+post.theta.omega.75 = post.theta.omega.75 / sum(post.theta.omega.75) * 100
+
+plot(theta, post.theta.omega.75, type = "l", ylab ="p(theta|omega=0.75,y)")
+```
+
+Compare marginal priors and posteriors for both parameters.
+```{r}
+par(mfrow=c(1,1))
+matplot(theta, cbind(prior.theta.marginal, posterior.theta.marginal),
+        type = "l")
+matplot(omega, cbind(prior.omega.marginal, posterior.omega.marginal), 
+        type = "l")
+```

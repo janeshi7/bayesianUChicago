@@ -1,0 +1,170 @@
+---
+title: "MSCA32014_HW1"
+author: "Zhiyin Shi"
+date: "April 4, 2017"
+output: word_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+##Study on Smokers
+The following data set is in library(faraway).\
+In it participating women are categorized into groups of smokers or not, 7 age groups and groups of dead or alive after 20 years of study.
+```{r}
+library (faraway)
+data(femsmoke)
+femsmoke
+```
+
+Create joint distribution of 3 counts variables:
+```{r}
+dead.yes <- subset(femsmoke, dead == "yes")[, 1]
+dim(dead.yes) <- c(2, 7)
+
+dead.no <- subset(femsmoke, dead == "no")[, 1]
+dim(dead.no) <- c(2, 7)
+
+femsmoke.joint <- array(rep(NA, 28), dim=c(2, 7, 2),
+                        dimnames=list(c("smoke.yes", "smoke.no"),
+                                      paste("age", 1 : 7, sep= "."),
+                                      c("dead.yes", "dead.no")))
+femsmoke.joint[, , 1] <- dead.yes
+femsmoke.joint[, , 2] <- dead.no
+
+N <- sum(femsmoke.joint)
+
+femsmoke.joint.p <- femsmoke.joint / N
+
+femsmoke.joint.p
+sum(femsmoke.joint.p)
+```
+
+Create marginal distribution for u (dead).
+```{r}
+uMarginal.dead <- c(uAlive = sum(femsmoke.joint.p[, , 2]),
+                    uDead  = sum(femsmoke.joint.p[, , 1]))
+uMarginal.dead
+sum(uMarginal.dead)
+```
+
+Create marginal distribution for v (smoke).
+```{r}
+vMarginal.smoke <- c(vsmoke.yes = sum(femsmoke.joint.p[1, , ]),
+                     vsmoke.no  = sum(femsmoke.joint.p[2, , ]))
+vMarginal.smoke
+sum(vMarginal.smoke)
+```
+
+Create marginal distribution for w (age).
+```{r}
+wMarginal.age <- c(age.1 = sum(femsmoke.joint.p[, 1, ]),
+                   age.2 = sum(femsmoke.joint.p[, 2, ]),
+                   age.3 = sum(femsmoke.joint.p[, 3, ]),
+                   age.4 = sum(femsmoke.joint.p[, 4, ]),
+                   age.5 = sum(femsmoke.joint.p[, 5, ]),
+                   age.6 = sum(femsmoke.joint.p[, 6, ]),
+                   age.7 = sum(femsmoke.joint.p[, 7, ]))
+wMarginal.age
+sum(wMarginal.age)
+```
+
+Create conditional distribution p(w,v|u="alive")=p(smoke,age|alive).
+```{r}
+cond.v.w.given.uAlive <- femsmoke.joint.p[, ,2] / uMarginal.dead[1]
+cond.v.w.given.uAlive
+sum(cond.v.w.given.uAlive)
+```
+
+Create conditional distribution p(v|u="alive")=p(smoke|alive)
+```{r}
+cond.v.given.uAlive <- apply(cond.v.w.given.uAlive, 1, sum)
+cond.v.given.uAlive
+sum(cond.v.given.uAlive)
+```
+
+Create conditional distribution p(w|u="alive",v="smoker")=p(age|alive,smoke)
+```{r}
+cond.w.given.uAlive.vSmoke <- femsmoke.joint.p[1, , 2] / 
+                              cond.v.given.uAlive[1]  / uMarginal.dead[1]
+
+cond.w.given.uAlive.vSmoke
+sum(cond.w.given.uAlive.vSmoke)
+```
+
+Compare the vectors p(w|v2,u1)p(v2|u1)p(u1) and p(w,v,u)[,v2,u1]
+```{r}
+rbind(uMarginal.dead["uAlive"]*cond.v.given.uAlive["smoke.yes"]*cond.w.given.uAlive.vSmoke,femsmoke.joint.p["smoke.yes",,"dead.no"])
+```
+
+Let the marginal distribution for age group be p(w) estimated marginal distribution from the sample:
+```{r}
+wMarginal.age
+```
+
+Given simulated age group, simulate variable v using conditional distribution p(v|w)p,i.e. using probabilities p(smoke.yes|age), p(smoke.no|age), p(smoke.no|age).\
+Given simulated variables for age and for smoke, simulate mortality variable using distribution p(dead|v,w), p(alive|v,w), p(alive|v,w).\
+Using the described procedure simulate outcomes for 100 participants.
+Use seed set.seed(284) for comparison.
+```{r}
+#Prob of smoke given age
+cond.v.given.age <- sapply(1:7, function(z) apply(femsmoke.joint.p[, z , ] / wMarginal.age[z], 1, sum))
+
+rownames(cond.v.given.age) <- c("smoke.yes.given.age","smoke.no.given.age")
+cond.v.given.age
+
+#Prob of dead given smoke and age
+dead.given.smoke.age <- c()
+for (i in 1:2) 
+{
+  cur.row <- c()
+  for (j in 1:2) 
+  {
+    cur.prob <-femsmoke.joint.p[j,,i] / cond.v.given.age[j,] /wMarginal.age
+    cur.row <- c(cur.row, cur.prob)
+  }
+  dead.given.smoke.age <- rbind(dead.given.smoke.age, cur.row)
+}
+
+rownames(dead.given.smoke.age) <- c("dead.yes.given.smoke.age", 
+                                    "dead.no.given.smoke.age")
+colnames(dead.given.smoke.age) <- c(paste("smoke.yes", 1:7, sep = "."),
+                                    paste("smoke.no", 1:7, sep = "."))
+dead.given.smoke.age
+
+#Data simulation
+set.seed(284)
+sim.age <- sample(1 : 7, 100, replace = T, prob = wMarginal.age)
+sim.smoke <- sapply(sim.age, function(z) sample(2:1, 1, replace = T, 
+                                                prob = switch(z,
+                                                cond.v.given.age[, 1],
+                                                cond.v.given.age[, 2],
+                                                cond.v.given.age[, 3],
+                                                cond.v.given.age[, 4],
+                                                cond.v.given.age[, 5],
+                                                cond.v.given.age[, 6],
+                                                cond.v.given.age[, 7])))
+
+sim.dead <- sapply(cbind(sim.age, sim.smoke), function(z) sample(1:0, 1, replace = T, prob = switch(z[1] + 7 *(z[2] -1),dead.given.smoke.age[,1],
+                                               dead.given.smoke.age[,2],
+                                               dead.given.smoke.age[,3],
+                                               dead.given.smoke.age[,4],
+                                               dead.given.smoke.age[,5],
+                                               dead.given.smoke.age[,6],
+                                               dead.given.smoke.age[,7],
+                                               dead.given.smoke.age[,8],
+                                               dead.given.smoke.age[,9],
+                                               dead.given.smoke.age[,10],
+                                               dead.given.smoke.age[,11],
+                                               dead.given.smoke.age[,12],
+                                               dead.given.smoke.age[,13],
+                                               dead.given.smoke.age[,14])))
+
+head(cbind(sim.age, sim.smoke, sim.dead), 25)
+```
+
+
+
+
+

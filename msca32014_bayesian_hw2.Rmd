@@ -1,0 +1,176 @@
+---
+title: "msca32014_hw2_zs"
+author: "Zhiyin Shi"
+date: "April 11, 2017"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+This projects helps understanding how Bayes theorem is used in statistical analysis.
+
+###Step1 
+Find posterior probability for binomial model with uniform prior and data. Use set.seed(81) for simulation of θ. Find mode, mean and variance of the posterior distribution.\
+\
+1.1 Simulate data of Bernulli trials
+```{r}
+set.seed(81)
+(data1 = rbinom(10,1,.71))
+```
+
+1.2 Construct uniform prior with 1001 theta values
+```{r}
+theta1   = seq(0.00001, 1 - 0.00001, length = 1001)
+p.theta1 = rep(1, length(theta1))
+p.theta1 = p.theta1 / sum(p.theta1)
+```
+
+1.3 Compute likelihood
+```{r}
+likeli.binom = function(param, data) {
+  num.k = sum(data)
+  num.s = length(data)
+  likeli.bn = param ^ num.k * (1 - param) ^ (num.s - num.k)
+  return(likeli.bn)
+}
+
+likelihood1 = likeli.binom(theta1, data1)
+```
+
+1.4 Compute posterior distribution
+```{r}
+post.distr1 = likelihood1 * p.theta1
+post.distr1 = post.distr1 / sum(post.distr1)
+```
+
+1.5 Plot
+```{r}
+suppressWarnings(source(paste("/Users/JaneShi/Desktop/MSCA32014/DBDA2Eprograms2/BernGrid.R",sep="/")))
+
+posterior1 = BernGrid(theta1, p.theta1, data1, plotType="Bars", 
+                      showCentTend ="None", showHDI =FALSE,
+                      showpD =FALSE)
+```
+
+1.6 Compute posterior mode, mean and variance
+```{r}
+mode1 = theta1[ which.max(post.distr1) ]
+mean1 = theta1 %*% post.distr1 / sum(post.distr1)
+var1  = ((theta1 - mean1) ^ 2) %*% post.distr1 / sum(post.distr1)
+
+c(mode1 = mode1, mean1 = mean1, var1 = var1)
+```
+
+###Step2
+Add more data and recalculate posterior distribution. Use the set.seed(97) for second simulation of theta. Find mode, mean and variance of the updated posterior distribution.\
+\
+2.1 Simulate new data
+```{r}
+set.seed(97)
+(data2 = rbinom(10,1,.71))
+```
+
+2.2 Update prior
+```{r}
+p.theta2 = posterior1
+```
+
+2.3 Compute likelihood
+```{r}
+likelihood2 = likeli.binom(theta1, data2)
+```
+
+2.4 Compute posterior distribution
+```{r}
+post.distr2 = likelihood2 * p.theta2
+post.distr2 = post.distr2 / sum(post.distr2)
+```
+
+2.5 Plot
+```{r}
+posterior2 = BernGrid(theta1, p.theta2, data2, plotType="Bars", 
+                      showCentTend ="None", showHDI =FALSE,
+                      showpD =FALSE)
+```
+
+2.6 Compute posterior mode, mean and variance
+```{r}
+mode2 = theta1[ which.max(post.distr2) ]
+mean2 = theta1 %*% post.distr2 / sum(post.distr2)
+var2  = ((theta1 - mean2) ^ 2) %*% post.distr2 / sum(post.distr2)
+
+c(mode2 = mode2, mean2 = mean2, var2 = var2)
+```
+
+###Step3
+Repeat steps 1. and 2. using data in reverse order: first use data2, then add data1.\
+\
+3.1 Define data, prior and likelihood
+```{r}
+data3       = data2
+p.theta3    = p.theta1
+likelihood3 = likeli.binom(theta1, data3)
+```
+
+3.2 Define posterior distribution
+```{r}
+post.distr3 = likelihood3 * p.theta3
+post.distr3 = post.distr3 / sum(post.distr3)
+```
+
+3.3 Plot
+```{r}
+posterior3 = BernGrid(theta1, p.theta3, data3, plotType="Bars", 
+                      showCentTend ="None", showHDI =FALSE,
+                      showpD =FALSE)
+```
+
+3.4 Compute posterior mode, mean and variance
+```{r}
+mode3 = theta1[ which.max(post.distr3) ]
+mean3 = theta1 %*% post.distr3 / sum(post.distr3)
+var3  = ((theta1 - mean3) ^ 2) %*% post.distr3 / sum(post.distr3)
+
+c(mode3 = mode3, mean3 = mean3, var3 = var3)
+```
+
+3.5 Update prior with posterior and recalculate posterior. First step, Define data, prior and likelihood.
+```{r}
+data4       = data1
+p.theta4    = posterior3
+likelihood4 = likeli.binom(theta1, data4)
+```
+
+3.6 Define posterior distribution
+```{r}
+post.distr4 = likelihood4 * p.theta4
+post.distr4 = post.distr4 / sum(post.distr4)
+```
+
+3.7 Plot
+```{r}
+posterior4 = BernGrid(theta1, p.theta4, data4, plotType="Bars", 
+                      showCentTend ="None", showHDI =FALSE,
+                      showpD =FALSE)
+```
+
+3.8 Compute posterior mode, mean and variance
+```{r}
+mode4 = theta1[ which.max(post.distr4) ]
+mean4 = theta1 %*% post.distr4 / sum(post.distr4)
+var4  = ((theta1 - mean4) ^ 2) %*% post.distr4 / sum(post.distr4)
+
+c(mode4 = mode4, mean4 = mean4, var4 = var4)
+```
+
+###Step4
+Compare mode, mean and variance of the updated posterior distributions.
+```{r}
+post.compare = rbind(c(mode2, mean2, var2), c(mode4, mean4, var4))
+rownames(post.compare) = c("data1.then.data2", "data2.then.data1")
+colnames(post.compare) = c("mode", "mean", "variance")
+post.compare
+```
+**Comment:** No matter which dataset comes first, the updated posterior distribution is always the same. 
